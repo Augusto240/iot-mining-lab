@@ -1,0 +1,35 @@
+services:
+  orion:
+    build: ./orion_mock
+    ports: ["1026:1026"]
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports: ["1883:1883", "9001:9001"]
+    volumes: ["./mosquitto.conf:/mosquitto/config/mosquitto.conf"]
+
+  nodered:
+    image: nodered/node-red:latest
+    ports: ["1880:1880"]
+    depends_on: [orion, mosquitto]
+    volumes:
+      - ./flows:/data
+
+  quantumleap:
+    image: fiware/quantum-leap:latest
+    ports: ["8668:8668"]
+    depends_on: [orion, crate]
+    environment:
+      - ORION_URL=http://orion:1026
+      - CRATE_HOST=crate
+      - CRATE_PORT=4200
+      - LOG_LEVEL=INFO
+
+  crate:
+    image: crate:4.6.5
+    ports: ["4200:4200", "4300:4300"]
+    environment:
+      - CRATE_HEAP_SIZE=512m
+      - discovery.type=single-node
+    command: crate -Cauth.host_based.enabled=false -Ccluster.name=democluster -Chttp.cors.enabled=true
+

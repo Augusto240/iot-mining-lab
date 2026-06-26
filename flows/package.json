@@ -1,0 +1,8 @@
+{
+  "name": "node-red-galeria",
+  "version": "1.0.0",
+  "description": "Node-RED for mining gallery air quality monitoring",
+  "dependencies": {
+    "node-red-dashboard": "~2.23.0"
+  }
+}
