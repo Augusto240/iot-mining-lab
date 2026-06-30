@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gemeo Digital - Mineracao</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+.header { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 24px 32px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { font-size: 22px; font-weight: 700; }
+.header h1 span { color: #38bdf8; }
+.header .status-badge { padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; }
+.status-normal { background: #064e3b; color: #34d399; }
+.status-alerta { background: #7f1d1d; color: #fca5a5; animation: pulse 1s infinite; }
+.status-atencao { background: #78350f; color: #fbbf24; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+
+.grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; padding: 24px 32px; }
+.sensor-card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; text-align: center; }
+.sensor-card .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.sensor-card .value { font-size: 36px; font-weight: 700; margin: 8px 0; }
+.sensor-card .unit { font-size: 14px; color: #64748b; }
+.sensor-card .bar { height: 4px; border-radius: 2px; margin-top: 12px; background: #334155; }
+.sensor-card .bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+.green { color: #34d399; } .bar-green { background: #34d399; }
+.yellow { color: #fbbf24; } .bar-yellow { background: #fbbf24; }
+.red { color: #f87171; } .bar-red { background: #f87171; }
+.blue { color: #38bdf8; } .bar-blue { background: #38bdf8; }
+.cyan { color: #22d3ee; } .bar-cyan { background: #22d3ee; }
+
+.bottom { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; padding: 0 32px 24px; }
+.info-card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; }
+.info-card h3 { font-size: 14px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+.info-card .big { font-size: 28px; font-weight: 700; }
+.info-card .sub { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+.fan { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.fan-icon { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.fan-on { background: #064e3b; animation: spin 1s linear infinite; }
+.fan-off { background: #334155; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.chart { padding: 0 32px 24px; }
+.chart-card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; }
+.chart-card h3 { font-size: 14px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+canvas { width: 100% !important; height: 200px !important; }
+
+.legend { display: flex; gap: 24px; margin-top: 8px; justify-content: center; }
+.legend span { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+.arch { padding: 0 32px 32px; }
+.arch-card { background: #1e293b; border-radius: 12px; padding: 24px; border: 1px solid #334155; }
+.arch-card h3 { font-size: 14px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+.pipeline { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.pipe-node { background: #0f172a; border: 1px solid #475569; border-radius: 8px; padding: 10px 16px; text-align: center; font-size: 12px; }
+.pipe-node .name { font-weight: 700; color: #e2e8f0; }
+.pipe-node .desc { color: #64748b; font-size: 10px; margin-top: 2px; }
+.pipe-arrow { color: #475569; font-size: 18px; }
+.pipe-node.active { border-color: #38bdf8; box-shadow: 0 0 12px rgba(56,189,248,0.2); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>&#9881; Gemeo Digital <span>- Mineracao Subterranea</span></h1>
+  <div id="header-status" class="status-badge status-normal">NORMAL</div>
+</div>
+
+<div class="grid">
+  <div class="sensor-card" id="card-ch4">
+    <div class="label">CH4 - Metano</div>
+    <div class="value green" id="val-ch4">0.00</div>
+    <div class="unit">%</div>
+    <div class="bar"><div class="bar-fill bar-green" id="bar-ch4" style="width:0%"></div></div>
+  </div>
+  <div class="sensor-card" id="card-co">
+    <div class="label">CO - Monoxido</div>
+    <div class="value green" id="val-co">0.0</div>
+    <div class="unit">ppm</div>
+    <div class="bar"><div class="bar-fill bar-green" id="bar-co" style="width:0%"></div></div>
+  </div>
+  <div class="sensor-card" id="card-co2">
+    <div class="label">CO2 - Dioxido</div>
+    <div class="value blue" id="val-co2">0</div>
+    <div class="unit">ppm</div>
+    <div class="bar"><div class="bar-fill bar-blue" id="bar-co2" style="width:0%"></div></div>
+  </div>
+  <div class="sensor-card" id="card-temp">
+    <div class="label">Temperatura</div>
+    <div class="value cyan" id="val-temp">0.0</div>
+    <div class="unit">&deg;C</div>
+    <div class="bar"><div class="bar-fill bar-cyan" id="bar-temp" style="width:0%"></div></div>
+  </div>
+  <div class="sensor-card" id="card-humid">
+    <div class="label">Umidade</div>
+    <div class="value cyan" id="val-humid">0.0</div>
+    <div class="unit">%</div>
+    <div class="bar"><div class="bar-fill bar-cyan" id="bar-humid" style="width:0%"></div></div>
+  </div>
+</div>
+
+<div class="bottom">
+  <div class="info-card">
+    <h3>Ventilador</h3>
+    <div class="fan">
+      <div class="fan-icon" id="fan-icon">&#127744;</div>
+      <div>
+        <div class="big" id="fan-status" style="color:#64748b">DESLIGADO</div>
+        <div class="sub">Atuador de ventilacao</div>
+      </div>
+    </div>
+  </div>
+  <div class="info-card">
+    <h3>Ultima Leitura</h3>
+    <div class="big" id="last-time" style="color:#38bdf8">--:--:--</div>
+    <div class="sub" id="last-date">Aguardando dados...</div>
+    <div class="sub" style="margin-top:8px">Leituras: <strong id="read-count">0</strong></div>
+  </div>
+  <div class="info-card">
+    <h3>Regra de Negocio</h3>
+    <div class="sub" style="margin-bottom:8px">NR-33 - Seguranca em Mineracao</div>
+    <div style="font-size:13px; line-height:1.8">
+      <span style="color:#34d399">&#9679;</span> CH4 &lt; 1% e CO &lt; 25ppm = <strong>Normal</strong><br>
+      <span style="color:#fbbf24">&#9679;</span> CH4 &gt; 0.5% ou CO &gt; 15ppm = <strong>Atencao</strong><br>
+      <span style="color:#f87171">&#9679;</span> CH4 &gt; 1% ou CO &gt; 25ppm = <strong>Alerta</strong>
+    </div>
+  </div>
+</div>
+
+<div class="chart">
+  <div class="chart-card">
+    <h3>Historico - Ultimos 5 minutos</h3>
+    <canvas id="chart"></canvas>
+    <div class="legend">
+      <span><span class="dot" style="background:#34d399"></span> CH4 (%)</span>
+      <span><span class="dot" style="background:#f87171"></span> CO (ppm/10)</span>
+      <span><span class="dot" style="background:#38bdf8"></span> CO2 (ppm/100)</span>
+    </div>
+  </div>
+</div>
+
+<div class="arch">
+  <div class="arch-card">
+    <h3>Arquitetura do Sistema</h3>
+    <div class="pipeline">
+      <div class="pipe-node active"><div class="name">Publisher</div><div class="desc">Simulacao IoT</div></div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-node active"><div class="name">MQTT</div><div class="desc">Mosquitto</div></div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-node active"><div class="name">Node-RED</div><div class="desc">Regras</div></div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-node active"><div class="name">Mock Orion</div><div class="desc">Context Broker NGSI v2</div></div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-node active"><div class="name">QuantumLeap</div><div class="desc">Serie Temporal</div></div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-node active"><div class="name">CrateDB</div><div class="desc">Armazenamento</div></div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-node" style="border-color:#38bdf8"><div class="name">Voce esta aqui</div><div class="desc">Dashboard</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const MAX_POINTS = 150;
+let ch4Data = [], coData = [], co2Data = [], timeLabels = [];
+let readCount = 0;
+
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = canvas.parentElement.clientWidth - 40;
+  canvas.height = 200;
+}
+resize();
+window.addEventListener('resize', resize);
+
+function getColor(val, thresholds) {
+  if (val > thresholds[1]) return 'red';
+  if (val > thresholds[0]) return 'yellow';
+  return 'green';
+}
+
+function setSensor(id, val, max, thresholds) {
+  document.getElementById('val-' + id).textContent = val;
+  const color = thresholds ? getColor(val, thresholds) : 'blue';
+  document.getElementById('val-' + id).className = 'value ' + color;
+  document.getElementById('bar-' + id).style.width = Math.min(val / max * 100, 100) + '%';
+  document.getElementById('bar-' + id).className = 'bar-fill bar-' + color;
+}
+
+function update(data) {
+  readCount++;
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('pt-BR');
+
+  setSensor('ch4', data.ch4, 2, [0.5, 1.0]);
+  setSensor('co', data.co, 50, [15, 25]);
+  setSensor('co2', data.co2, 2000, null);
+  setSensor('temp', data.temperatura, 50, [35, 40]);
+  setSensor('humid', data.umidade, 100, null);
+
+  // Status
+  const badge = document.getElementById('header-status');
+  badge.textContent = data.status.toUpperCase();
+  badge.className = 'status-badge status-' + data.status;
+
+  // Fan
+  const fanIcon = document.getElementById('fan-icon');
+  const fanStatus = document.getElementById('fan-status');
+  if (data.ventilador) {
+    fanIcon.className = 'fan-icon fan-on';
+    fanStatus.textContent = 'LIGADO';
+    fanStatus.style.color = '#34d399';
+  } else {
+    fanIcon.className = 'fan-icon fan-off';
+    fanStatus.textContent = 'DESLIGADO';
+    fanStatus.style.color = '#64748b';
+  }
+
+  // Time
+  document.getElementById('last-time').textContent = timeStr;
+  document.getElementById('last-date').textContent = now.toLocaleDateString('pt-BR');
+  document.getElementById('read-count').textContent = readCount;
+
+  // Chart data
+  ch4Data.push(data.ch4);
+  coData.push(data.co / 10);
+  co2Data.push(data.co2 / 100);
+  timeLabels.push(timeStr);
+
+  if (ch4Data.length > MAX_POINTS) {
+    ch4Data.shift(); coData.shift(); co2Data.shift(); timeLabels.shift();
+  }
+
+  drawChart();
+}
+
+function drawChart() {
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // Grid
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    const y = (h / 5) * i;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  if (ch4Data.length < 2) return;
+
+  const maxVal = Math.max(...ch4Data, ...coData, ...co2Data, 2) * 1.2;
+
+  function drawLine(data, color) {
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < data.length; i++) {
+      const x = (i / (MAX_POINTS - 1)) * w;
+      const y = h - (data[i] / maxVal) * h;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  drawLine(co2Data, '#38bdf8');
+  drawLine(coData, '#f87171');
+  drawLine(ch4Data, '#34d399');
+}
+
+async function fetchData() {
+  try {
+    const resp = await fetch('http://localhost:1026/v2/entities/Galeria:Ponto1');
+    if (!resp.ok) return;
+    const d = await resp.json();
+    update({
+      ch4: d.ch4?.value || 0,
+      co: d.co?.value || 0,
+      co2: d.co2?.value || 0,
+      temperatura: d.temperatura?.value || 0,
+      umidade: d.umidade?.value || 0,
+      ventilador: d.ventilador?.value || false,
+      status: d.status?.value || 'normal'
+    });
+  } catch(e) {}
+}
+
+setInterval(fetchData, 2000);
+fetchData();
+</script>
+
+</body>
+</html>
