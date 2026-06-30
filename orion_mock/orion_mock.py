@@ -2,10 +2,12 @@ from flask import Flask, request, jsonify
 import requests as req
 import time
 import threading
-from socketserver import ThreadingTCPServer, BaseRequestHandler
 import json
+import os
 
 app = Flask(__name__)
+
+DATA_FILE = '/tmp/orion_data.json'
 
 @app.after_request
 def add_cors(response):
@@ -14,52 +16,70 @@ def add_cors(response):
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return response
 
-entities = {}
-subscriptions = []
 lock = threading.Lock()
+
+def load_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f)
+    return {"entities": {}, "subscriptions": []}
+
+def save_data(data):
+    with open(DATA_FILE, 'w') as f:
+        json.dump(data, f)
 
 @app.route('/version', methods=['GET'])
 def version():
-    return jsonify({
-        "orion": {
-            "version": "3.10.1-mock",
-            "uptime": f"{int(time.time())}s",
-            "note": "Python mock for ARM64 compatibility"
-        }
-    })
+    return jsonify({"orion": {"version": "3.10.1-mock", "uptime": f"{int(time.time())}s"}})
 
 @app.route('/v2/entities', methods=['POST'])
 def create_entity():
     with lock:
+        data = load_data()
         entity = request.json
-        entities[entity['id']] = entity
+        data["entities"][entity['id']] = entity
+        save_data(data)
     return '', 204
 
 @app.route('/v2/entities', methods=['GET'])
 def list_entities():
     with lock:
-        return jsonify(list(entities.values()))
+        data = load_data()
+        return jsonify(list(data["entities"].values()))
 
 @app.route('/v2/entities/<path:entity_id>', methods=['GET'])
 def get_entity(entity_id):
     with lock:
-        if entity_id in entities:
-            return jsonify(entities[entity_id])
+        data = load_data()
+        if entity_id in data["entities"]:
+            return jsonify(data["entities"][entity_id])
     return jsonify({"error": "entity not found"}), 404
+
+@app.route('/v2/entities/<path:entity_id>', methods=['DELETE'])
+def delete_entity(entity_id):
+    with lock:
+        data = load_data()
+        if entity_id in data["entities"]:
+            del data["entities"][entity_id]
+            save_data(data)
+    return '', 204
 
 @app.route('/v2/entities/<path:entity_id>/attrs', methods=['PATCH'])
 def update_entity(entity_id):
     with lock:
-        if entity_id not in entities:
-            entities[entity_id] = {"id": entity_id, "type": "Unknown"}
+        data = load_data()
+        if entity_id not in data["entities"]:
+            data["entities"][entity_id] = {"id": entity_id, "type": "Unknown"}
 
         attrs = request.json
         for key, val in attrs.items():
-            entities[entity_id][key] = val
+            data["entities"][entity_id][key] = val
 
-        current = dict(entities[entity_id])
+        current = dict(data["entities"][entity_id])
+        subs = data.get("subscriptions", [])
+        save_data(data)
 
-    for sub in subscriptions:
+    for sub in subs:
         url = sub.get('notification', {}).get('http', {}).get('url', '')
         if url:
             notification = {"data": [current]}
@@ -78,15 +98,17 @@ def send_notification(url, payload):
 @app.route('/v2/subscriptions', methods=['POST'])
 def create_subscription():
     with lock:
-        sub = request.json
-        subscriptions.append(sub)
+        data = load_data()
+        data.setdefault("subscriptions", []).append(request.json)
+        save_data(data)
     return '', 204
 
 @app.route('/v2/subscriptions', methods=['GET'])
 def get_subscriptions():
     with lock:
+        data = load_data()
         result = []
-        for i, s in enumerate(subscriptions):
+        for i, s in enumerate(data.get("subscriptions", [])):
             entry = dict(s)
             entry['id'] = str(i)
             result.append(entry)
@@ -95,21 +117,25 @@ def get_subscriptions():
 @app.route('/v2/subscriptions/<sub_id>', methods=['GET'])
 def get_subscription(sub_id):
     with lock:
+        data = load_data()
         idx = int(sub_id)
-        if 0 <= idx < len(subscriptions):
-            entry = dict(subscriptions[idx])
+        subs = data.get("subscriptions", [])
+        if 0 <= idx < len(subs):
+            entry = dict(subs[idx])
             entry['id'] = sub_id
             return jsonify(entry)
-    return jsonify({"error": "subscription not found"}), 404
+    return jsonify({"error": "not found"}), 404
 
 @app.route('/v2/subscriptions/<sub_id>', methods=['DELETE'])
 def delete_subscription(sub_id):
     with lock:
+        data = load_data()
         idx = int(sub_id)
-        if 0 <= idx < len(subscriptions):
-            subscriptions.pop(idx)
-            return '', 204
-    return jsonify({"error": "subscription not found"}), 404
+        subs = data.get("subscriptions", [])
+        if 0 <= idx < len(subs):
+            subs.pop(idx)
+            save_data(data)
+    return '', 204
 
 @app.route('/v2/op/query', methods=['POST'])
 def query():
@@ -117,17 +143,19 @@ def query():
     entities_list = body.get('entities', [])
     attrs = body.get('attrs', [])
     with lock:
+        data = load_data()
         results = []
         for e in entities_list:
             eid = e.get('id', '')
-            if eid in entities:
+            if eid in data["entities"]:
+                ent = data["entities"][eid]
                 if attrs:
-                    filtered = {k: entities[eid][k] for k in attrs if k in entities[eid]}
+                    filtered = {k: ent[k] for k in attrs if k in ent}
                     filtered['id'] = eid
-                    filtered['type'] = entities[eid].get('type', '')
+                    filtered['type'] = ent.get('type', '')
                     results.append(filtered)
                 else:
-                    results.append(entities[eid])
+                    results.append(ent)
     return jsonify(results)
 
 @app.route('/notify', methods=['POST'])
