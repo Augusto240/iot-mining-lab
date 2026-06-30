@@ -1,6 +1,6 @@
 import streamlit as st
+import requests
 import pandas as pd
-from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta
 
 st.set_page_config(
@@ -12,26 +12,26 @@ st.set_page_config(
 st.title("Indicadores de Negocio - Qualidade do Ar")
 st.subheader("Galeria Subterranea de Mineracao")
 
-CRATE_HOST = "localhost"
-CRATE_PORT = 4200
+CRATE_URL = "http://localhost:4200/_sql"
 
-@st.cache_resource
-def get_connection():
-    return create_engine(f"crate://{CRATE_HOST}:{CRATE_PORT}/")
+def query_crate(stmt, params=None):
+    body = {"stmt": stmt}
+    if params:
+        body["args"] = params
+    r = requests.post(CRATE_URL, json=body, timeout=10)
+    data = r.json()
+    return pd.DataFrame(data["rows"], columns=data["cols"])
 
 def load_data(hours=24):
-    engine = get_connection()
     cutoff_ms = int((datetime.utcnow() - timedelta(hours=hours)).timestamp() * 1000)
-    query = text("""
-        SELECT time_index as ts, ch4, co, co2, temperatura, umidade, ventilador, status
-        FROM doc.etairqualitysensor
-        WHERE time_index > :cutoff
-        ORDER BY time_index DESC
-    """)
     try:
-        df = pd.read_sql(query, engine, params=[cutoff_ms])
-        if not df.empty and df['ts'].dtype in ['int64', 'float64']:
-            df['ts'] = pd.to_datetime(df['ts'], unit='ms')
+        df = query_crate(
+            "SELECT time_index as ts, ch4, co, co2, temperatura, umidade, ventilador, status "
+            "FROM doc.etairqualitysensor WHERE time_index > $1 ORDER BY time_index DESC",
+            [cutoff_ms]
+        )
+        if not df.empty:
+            df["ts"] = pd.to_datetime(df["ts"], unit="ms")
         return df
     except Exception as e:
         st.warning(f"Erro ao conectar ao CrateDB: {e}")
@@ -40,29 +40,21 @@ def load_data(hours=24):
 def calculate_indicators(df):
     if df.empty:
         return None
-
     total = len(df)
-    alert = len(df[df['status'] == 'alerta'])
-    atencao = len(df[df['status'] == 'atencao'])
-    normal = len(df[df['status'] == 'normal'])
-
-    alert_pct = (alert / total * 100) if total > 0 else 0
-    atencao_pct = (atencao / total * 100) if total > 0 else 0
-    compliance_pct = 100 - alert_pct
-
-    fan_on = len(df[df['ventilador'] == True]) if 'ventilador' in df.columns else 0
+    alert = len(df[df["status"] == "alerta"])
+    atencao = len(df[df["status"] == "atencao"])
+    normal = len(df[df["status"] == "normal"])
+    fan_on = len(df[df["ventilador"] == True])
     fan_hours = fan_on * 2 / 3600
-    energy_cost = fan_hours * 15.0
-
     return {
-        'total': total,
-        'alert_pct': alert_pct,
-        'atencao_pct': atencao_pct,
-        'compliance_pct': compliance_pct,
-        'fan_hours': fan_hours,
-        'energy_cost': energy_cost,
-        'incidents': alert,
-        'normal_pct': (normal / total * 100) if total > 0 else 0
+        "total": total,
+        "alert_pct": alert / total * 100,
+        "atencao_pct": atencao / total * 100,
+        "compliance_pct": 100 - (alert / total * 100),
+        "fan_hours": fan_hours,
+        "energy_cost": fan_hours * 15.0,
+        "incidents": alert,
+        "normal_pct": normal / total * 100,
     }
 
 hours = st.selectbox("Periodo de analise:", [1, 6, 12, 24, 48], index=2)
@@ -71,7 +63,7 @@ ind = calculate_indicators(df)
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Registros", f"{ind['total']}" if ind else "0")
+    st.metric("Registros", f"{ind['total']:,}" if ind else "0")
 with col2:
     st.metric("Conformidade NR-33", f"{ind['compliance_pct']:.1f}%" if ind else "N/A")
 with col3:
@@ -88,7 +80,7 @@ if ind:
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("Conformidade NR-33")
-            comp = ind['compliance_pct']
+            comp = ind["compliance_pct"]
             if comp >= 95:
                 st.success(f"Conforme - {comp:.1f}% dentro dos limites")
             elif comp >= 80:
@@ -106,7 +98,7 @@ if ind:
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.metric("Alertas", ind['incidents'])
+            st.metric("Alertas", ind["incidents"])
             st.caption("CH4 > 1% ou CO > 25ppm")
         with c2:
             st.metric("Atencao", f"{ind['atencao_pct']:.1f}%")
@@ -118,10 +110,10 @@ if ind:
     with tab2:
         st.subheader("Historico de Qualidade do Ar")
         if not df.empty:
-            chart_df = df.sort_values('ts').set_index('ts')
-            st.line_chart(chart_df[['ch4', 'co']])
+            chart_df = df.sort_values("ts").set_index("ts")
+            st.line_chart(chart_df[["ch4", "co"]])
             st.subheader("Temperatura e Umidade")
-            st.line_chart(chart_df[['temperatura', 'umidade']])
+            st.line_chart(chart_df[["temperatura", "umidade"]])
             st.subheader("Dados Recentes")
             st.dataframe(df.head(20))
         else:
@@ -139,7 +131,7 @@ Node-RED (regras de negocio + dashboard)
 Mock Orion (context broker)
     |  HTTP POST (notificacoes)
     v
-QuantumLeap (série temporal)
+QuantumLeap (serie temporal)
     |
     v
 CrateDB (armazenamento)
@@ -147,7 +139,7 @@ CrateDB (armazenamento)
     v
 Streamlit (indicadores de negocio)
         """)
-        st.write("**Regra de negocio:** CH4 > 1%% ou CO > 25ppm → Ativar ventilador + alerta")
+        st.write("**Regra de negocio:** CH4 > 1% ou CO > 25ppm -> Ativar ventilador + alerta")
         st.write("**Pergunta que a visualizacao responde:** Qual o impacto operacional e economico da qualidade do ar?")
 
 else:

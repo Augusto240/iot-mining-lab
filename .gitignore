@@ -16,3 +16,6 @@ venv/
 **/.config.users*.json
 **/.flows.json.backup
 flows/settings.js
+
+# Engram AI agent memory
+.engram/
